@@ -3,7 +3,14 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Whiskey Reviews</title>
+    <title>WhiskeyNotes — Discover &amp; Review the World's Finest Whiskies</title>
+    <meta name="description" content="Browse, discover and review the world's finest whiskies. Share your tasting notes and read reviews from a community of whiskey enthusiasts." />
+    <meta property="og:title" content="WhiskeyNotes" />
+    <meta property="og:description" content="Browse, discover and review the world's finest whiskies." />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="WhiskeyNotes" />
+    <meta name="twitter:description" content="Browse, discover and review the world's finest whiskies." />
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🥃</text></svg>" />
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -12,17 +19,19 @@
     <link rel="stylesheet" href="/css/style.css" />
 </head>
 <body>
+    <a href="#app" class="skip-link">Skip to main content</a>
+
     <header class="navbar">
         <div class="navbar-inner">
-            <a href="#/" class="brand">&#x1F943; Whiskey Reviews</a>
-            <nav id="nav-links" class="nav-links"></nav>
+            <a href="#/" class="brand"><span aria-hidden="true">🥃</span> WhiskeyNotes</a>
+            <nav id="nav-links" class="nav-links" aria-label="Main navigation"></nav>
         </div>
     </header>
 
-    <main id="app" class="container"></main>
+    <main id="app" class="container" aria-live="polite" aria-label="Page content"></main>
 
     <footer class="footer">
-        <p>Whiskey Reviews &mdash; built with <a href="https://pocketbase.io" target="_blank" rel="noopener">PocketBase</a></p>
+        <p>WhiskeyNotes &mdash; built with <a href="https://pocketbase.io" target="_blank" rel="noopener">PocketBase</a></p>
     </footer>
 
     <!-- PocketBase JS SDK (bundled locally) -->

@@ -29,7 +29,7 @@ function formatDate(iso) {
 
 function skeletonGrid(n = 6) {
     const card = `
-        <div class="whiskey-card skeleton">
+        <div class="whiskey-card skeleton" aria-hidden="true">
             <div class="card-thumb"></div>
             <div class="card-body">
                 <div class="skeleton-line w80"></div>
@@ -37,7 +37,7 @@ function skeletonGrid(n = 6) {
                 <div class="skeleton-line w30"></div>
             </div>
         </div>`;
-    return `<div class="whiskey-grid">${card.repeat(n)}</div>`;
+    return `<div class="whiskey-grid" aria-busy="true" aria-label="Loading whiskeys">${card.repeat(n)}</div>`;
 }
 
 function passwordToggle(inputId) {
@@ -99,11 +99,12 @@ function renderNav() {
             <a href="#/register" class="btn-primary">Register</a>`;
     } else {
         const adminBadge = isAdmin() ? `<span class="admin-badge">ADMIN</span>` : "";
+        const userSvg = `<svg aria-hidden="true" focusable="false" xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>`;
         navLinksEl.innerHTML = `
             ${isAdmin() ? `<a href="#/add-whiskey">+ Add Whiskey</a>` : ""}
             <a href="#/my-reviews">My Reviews</a>
-            <span style="color:#ccc;font-size:.9rem">
-                👤 ${esc(user.username)}${adminBadge}
+            <span style="color:var(--text-muted);font-size:.88rem;display:inline-flex;align-items:center;gap:.35rem;padding:.5rem .6rem">
+                ${userSvg} <span>${esc(user.username)}${adminBadge}</span>
             </span>
             <button onclick="logout()">Logout</button>`;
     }
@@ -133,13 +134,15 @@ async function renderHome() {
             </div>
             <div class="search-bar">
                 <div class="search-wrapper">
-                    <svg class="search-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+                    <svg class="search-icon" aria-hidden="true" focusable="false" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+                    <label for="whiskey-search" class="sr-only">Search whiskeys</label>
                     <input
                         id="whiskey-search"
                         type="search"
                         placeholder="Search by name, distillery, country or type…"
                         oninput="filterWhiskeys(this.value)"
                         autocomplete="off"
+                        aria-label="Search whiskeys"
                     />
                 </div>
             </div>
@@ -147,7 +150,7 @@ async function renderHome() {
 
         filterWhiskeys("");
     } catch (err) {
-        appEl.innerHTML = `<div class="form-error">Failed to load whiskeys: ${esc(err.message)}</div>`;
+        appEl.innerHTML = `<div class="form-error" role="alert">${esc(err.message)}</div>`;
     }
 }
 
@@ -162,9 +165,9 @@ function filterWhiskeys(query) {
         : _homeRecords;
 
     if (filtered.length === 0) {
-        gridEl.innerHTML = `<div class="empty-state"><div class="emoji">🔍</div><p>No whiskeys match your search.</p></div>`;
+        gridEl.innerHTML = `<div class="empty-state"><div class="empty-icon" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg></div><p>No whiskeys match your search.</p></div>`;
     } else {
-        gridEl.innerHTML = filtered.map(w => whiskeyCardHtml(w, _homeAvgRatings[w.id])).join("");
+        gridEl.innerHTML = filtered.map((w, i) => whiskeyCardHtml(w, _homeAvgRatings[w.id], i)).join("");
     }
 }
 
@@ -201,17 +204,25 @@ async function loadAverageRatings() {
     }
 }
 
-function whiskeyCardHtml(w, ratingInfo) {
+function whiskeyCardHtml(w, ratingInfo, animIndex = 0) {
     const imgUrl  = imageUrl(w, w.image);
     const thumb   = imgUrl
         ? `<img src="${esc(imgUrl)}" alt="${esc(w.name)}" loading="lazy" />`
-        : "🥃";
+        : `<span aria-hidden="true" style="font-size:4rem">🥃</span>`;
     const ratingHtml = ratingInfo
         ? `${starsHtml(ratingInfo.avg)} <span class="review-count">(${ratingInfo.count})</span>`
         : `<span class="text-muted" style="font-size:.82rem">No reviews yet</span>`;
+    const delay = animIndex < 12 ? `animation-delay:${animIndex * 0.05}s` : "";
 
     return `
-        <div class="whiskey-card" onclick="navigate('/whiskey/${esc(w.id)}')">
+        <div class="whiskey-card"
+             role="button"
+             tabindex="0"
+             aria-label="${esc(w.name)}${w.distillery ? ` — ${esc(w.distillery)}` : ""}"
+             style="${delay}"
+             onclick="navigate('/whiskey/${esc(w.id)}')"
+             onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();navigate('/whiskey/${esc(w.id)}');}"
+        >
             <div class="card-thumb">${thumb}</div>
             <div class="card-body">
                 <div class="card-name">${esc(w.name)}</div>
@@ -224,7 +235,7 @@ function whiskeyCardHtml(w, ratingInfo) {
 
 // ── Whiskey detail ────────────────────────────────────────────────────────────
 async function renderWhiskeyDetail(id) {
-    appEl.innerHTML = `<div class="loading">Loading… 🥃</div>`;
+    appEl.innerHTML = `<div class="loading"><div class="spinner" aria-hidden="true"></div>Loading whiskey…</div>`;
     try {
         const [whiskey, reviewsPage] = await Promise.all([
             pb.collection("whiskeys").getOne(id),
@@ -239,7 +250,7 @@ async function renderWhiskeyDetail(id) {
     } catch (err) {
         appEl.innerHTML = `
             <a href="#/" class="back-link">Back to whiskeys</a>
-            <div class="form-error">Failed to load whiskey: ${esc(err.message)}</div>`;
+            <div class="form-error" role="alert">${esc(err.message)}</div>`;
     }
 }
 
@@ -247,7 +258,7 @@ function renderDetailView(w, reviews, nicknames) {
     const imgUrl = imageUrl(w, w.image);
     const imgHtml = imgUrl
         ? `<img src="${esc(imgUrl)}" alt="${esc(w.name)}" />`
-        : "🥃";
+        : `<span aria-hidden="true" style="font-size:5rem">🥃</span>`;
 
     const specsArr = [];
     if (w.distillery) specsArr.push(`<span><strong>Distillery:</strong> ${esc(w.distillery)}</span>`);
@@ -264,7 +275,7 @@ function renderDetailView(w, reviews, nicknames) {
     const hasReviewed = user ? reviews.some(r => r.user === user.id) : false;
 
     const reviewsHtml = reviews.length === 0
-        ? `<div class="empty-state"><div class="emoji">📝</div><p>No reviews yet. Be the first!</p></div>`
+        ? `<div class="empty-state"><div class="empty-icon" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.2"><path d="M12 20h9M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg></div><p>No reviews yet. Be the first!</p></div>`
         : reviews.map(r => reviewCardHtml(r, nicknames)).join("");
 
     const addReviewHtml = !user
@@ -327,16 +338,18 @@ function reviewFormHtml(whiskeyId) {
     return `
         <div class="form-card mb-3" style="max-width:600px;margin-left:0">
             <h2>Write a Review</h2>
-            <div id="review-error"></div>
+            <div id="review-error" role="alert" aria-live="polite"></div>
             <form id="review-form">
                 <input type="hidden" name="whiskey" value="${esc(whiskeyId)}" />
                 <div class="form-group">
-                    <label>Rating *</label>
-                    <div class="star-input">
-                        ${[5,4,3,2,1].map(n => `
-                        <input type="radio" name="rating" id="star${n}" value="${n}" ${n === 5 ? "required" : ""} />
-                        <label for="star${n}" title="${n} star${n !== 1 ? "s" : ""}">★</label>`).join("")}
-                    </div>
+                    <fieldset style="border:none;padding:0">
+                        <legend style="display:block;font-weight:500;font-size:.83rem;margin-bottom:.45rem;color:var(--text-mid);letter-spacing:.04em;text-transform:uppercase">Rating *</legend>
+                        <div class="star-input">
+                            ${[5,4,3,2,1].map(n => `
+                            <input type="radio" name="rating" id="star${n}" value="${n}" ${n === 5 ? "required" : ""} aria-label="${n} star${n !== 1 ? "s" : ""}" />
+                            <label for="star${n}" aria-hidden="true" title="${n} star${n !== 1 ? "s" : ""}">★</label>`).join("")}
+                        </div>
+                    </fieldset>
                 </div>
                 <div class="form-group">
                     <label for="rev-title">Title</label>
@@ -355,6 +368,7 @@ async function submitReview(e, whiskeyId) {
     e.preventDefault();
     const form  = e.target;
     const errEl = document.getElementById("review-error");
+    const btn   = form.querySelector('button[type="submit"]');
     errEl.innerHTML = "";
 
     const ratingInput = form.querySelector('input[name="rating"]:checked');
@@ -362,6 +376,9 @@ async function submitReview(e, whiskeyId) {
         errEl.innerHTML = `<div class="form-error">Please select a rating.</div>`;
         return;
     }
+
+    btn.disabled = true;
+    btn.textContent = "Submitting…";
 
     const data = {
         whiskey: whiskeyId,
@@ -377,6 +394,8 @@ async function submitReview(e, whiskeyId) {
     } catch (err) {
         const msg = err.response?.message || err.message || "Failed to submit review.";
         errEl.innerHTML = `<div class="form-error">${esc(msg)}</div>`;
+        btn.disabled = false;
+        btn.textContent = "Submit Review";
     }
 }
 
@@ -395,8 +414,8 @@ function renderLogin() {
     if (currentUser()) return navigate("/");
     appEl.innerHTML = `
         <div class="form-card">
-            <h2>🥃 Login</h2>
-            <div id="login-error"></div>
+            <h2>Login</h2>
+            <div id="login-error" role="alert" aria-live="polite"></div>
             <form id="login-form">
                 <div class="form-group">
                     <label for="login-email">Email or Username</label>
@@ -419,15 +438,20 @@ function renderLogin() {
 async function handleLogin(e) {
     e.preventDefault();
     const errEl = document.getElementById("login-error");
+    const btn   = e.target.querySelector('button[type="submit"]');
     const identity = document.getElementById("login-email").value.trim();
     const password = document.getElementById("login-pass").value;
     errEl.innerHTML = "";
+    btn.disabled = true;
+    btn.textContent = "Logging in…";
     try {
         await pb.collection("users").authWithPassword(identity, password);
         navigate("/");
     } catch (err) {
         const msg = err.response?.message || err.message || "Login failed.";
         errEl.innerHTML = `<div class="form-error">${esc(msg)}</div>`;
+        btn.disabled = false;
+        btn.textContent = "Login";
     }
 }
 
@@ -436,9 +460,9 @@ function renderRegister() {
     if (currentUser()) return navigate("/");
     appEl.innerHTML = `
         <div class="form-card">
-            <h2>🥃 Create Account</h2>
+            <h2>Create Account</h2>
             <p class="text-muted mb-2" style="font-size:.9rem">Your username is your public display name on reviews.</p>
-            <div id="reg-error"></div>
+            <div id="reg-error" role="alert" aria-live="polite"></div>
             <form id="reg-form">
                 <div class="form-group">
                     <label for="reg-username">Username *</label>
@@ -475,6 +499,7 @@ function renderRegister() {
 async function handleRegister(e) {
     e.preventDefault();
     const errEl = document.getElementById("reg-error");
+    const btn   = e.target.querySelector('button[type="submit"]');
     const username = document.getElementById("reg-username").value.trim();
     const email    = document.getElementById("reg-email").value.trim();
     const pass     = document.getElementById("reg-pass").value;
@@ -485,6 +510,9 @@ async function handleRegister(e) {
         errEl.innerHTML = `<div class="form-error">Passwords do not match.</div>`;
         return;
     }
+
+    btn.disabled = true;
+    btn.textContent = "Creating account…";
 
     try {
         await pb.collection("users").create({
@@ -505,6 +533,8 @@ async function handleRegister(e) {
         const fields = Object.entries(data).map(([k, v]) => `<strong>${esc(k)}</strong>: ${esc(v?.message ?? v)}`).join("<br>");
         const msg    = fields || esc(err.response?.message || err.message || "Registration failed.");
         errEl.innerHTML = `<div class="form-error">${msg}</div>`;
+        btn.disabled = false;
+        btn.textContent = "Create Account";
     }
 }
 
@@ -518,9 +548,9 @@ function renderAddWhiskey() {
     appEl.innerHTML = `
         <a href="#/" class="back-link">Back to whiskeys</a>
         <div class="form-card" style="max-width:700px;margin:0 auto">
-            <h2>🥃 Add Whiskey</h2>
-            <div id="wsk-error"></div>
-            <div id="wsk-success"></div>
+            <h2>Add Whiskey</h2>
+            <div id="wsk-error" role="alert" aria-live="polite"></div>
+            <div id="wsk-success" aria-live="polite"></div>
             <form id="wsk-form" enctype="multipart/form-data">
                 <div class="form-group">
                     <label for="wsk-name">Name *</label>
@@ -623,7 +653,7 @@ async function renderMyReviews() {
     const user = currentUser();
     if (!user) return navigate("/login");
 
-    appEl.innerHTML = `<div class="loading">Loading your reviews… 🥃</div>`;
+    appEl.innerHTML = `<div class="loading"><div class="spinner" aria-hidden="true"></div>Loading your reviews…</div>`;
     try {
         const reviews = await pb.collection("reviews").getFullList({
             filter: `user = "${user.id}"`,
@@ -632,7 +662,7 @@ async function renderMyReviews() {
         });
 
         const cardsHtml = reviews.length === 0
-            ? `<div class="empty-state"><div class="emoji">📝</div><p>You haven't written any reviews yet. <a href="#/">Browse whiskeys</a> to get started!</p></div>`
+            ? `<div class="empty-state"><div class="empty-icon" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.2"><path d="M12 20h9M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg></div><p>You haven't written any reviews yet. <a href="#/">Browse whiskeys</a> to get started!</p></div>`
             : reviews.map(r => myReviewCardHtml(r)).join("");
 
         appEl.innerHTML = `
