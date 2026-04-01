@@ -27,6 +27,26 @@ function formatDate(iso) {
     return new Date(iso).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
 }
 
+function skeletonGrid(n = 6) {
+    const card = `
+        <div class="whiskey-card skeleton">
+            <div class="card-thumb"></div>
+            <div class="card-body">
+                <div class="skeleton-line w80"></div>
+                <div class="skeleton-line w50"></div>
+                <div class="skeleton-line w30"></div>
+            </div>
+        </div>`;
+    return `<div class="whiskey-grid">${card.repeat(n)}</div>`;
+}
+
+function passwordToggle(inputId) {
+    return `<button type="button" class="password-toggle" aria-label="Toggle password visibility"
+        onclick="(function(btn){var inp=document.getElementById('${inputId}');inp.type=inp.type==='password'?'text':'password';})(this)">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>
+    </button>`;
+}
+
 function imageUrl(record, filename) {
     if (!filename) return null;
     return pb.getFileUrl(record, filename, { thumb: "300x300" });
@@ -99,24 +119,29 @@ let _homeRecords   = [];
 let _homeAvgRatings = {};
 
 async function renderHome() {
-    appEl.innerHTML = `<div class="loading">Loading whiskeys… 🥃</div>`;
+    appEl.innerHTML = skeletonGrid(6);
     try {
         _homeRecords    = await pb.collection("whiskeys").getFullList({ sort: "name" });
         _homeAvgRatings = await loadAverageRatings();
 
         appEl.innerHTML = `
             <div class="hero">
-                <h1>🥃 Whiskey Reviews</h1>
+                <span class="hero-eyebrow">Est. Collection</span>
+                <h1>The Art of <em>Whiskey</em></h1>
                 <p>Discover and review the world's finest whiskies</p>
+                <span class="hero-divider"></span>
             </div>
             <div class="search-bar">
-                <input
-                    id="whiskey-search"
-                    type="search"
-                    placeholder="Search by name, distillery, country or type…"
-                    oninput="filterWhiskeys(this.value)"
-                    autocomplete="off"
-                />
+                <div class="search-wrapper">
+                    <svg class="search-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+                    <input
+                        id="whiskey-search"
+                        type="search"
+                        placeholder="Search by name, distillery, country or type…"
+                        oninput="filterWhiskeys(this.value)"
+                        autocomplete="off"
+                    />
+                </div>
             </div>
             <div id="whiskey-grid" class="whiskey-grid"></div>`;
 
@@ -379,7 +404,10 @@ function renderLogin() {
                 </div>
                 <div class="form-group">
                     <label for="login-pass">Password</label>
-                    <input type="password" id="login-pass" required autocomplete="current-password" />
+                    <div class="password-wrapper">
+                        <input type="password" id="login-pass" required autocomplete="current-password" />
+                        ${passwordToggle("login-pass")}
+                    </div>
                 </div>
                 <button type="submit" class="btn btn-amber" style="width:100%">Login</button>
             </form>
@@ -424,11 +452,17 @@ function renderRegister() {
                 <div class="form-row">
                     <div class="form-group">
                         <label for="reg-pass">Password *</label>
-                        <input type="password" id="reg-pass" required minlength="8" autocomplete="new-password" />
+                        <div class="password-wrapper">
+                            <input type="password" id="reg-pass" required minlength="8" autocomplete="new-password" />
+                            ${passwordToggle("reg-pass")}
+                        </div>
                     </div>
                     <div class="form-group">
                         <label for="reg-pass2">Confirm *</label>
-                        <input type="password" id="reg-pass2" required minlength="8" autocomplete="new-password" />
+                        <div class="password-wrapper">
+                            <input type="password" id="reg-pass2" required minlength="8" autocomplete="new-password" />
+                            ${passwordToggle("reg-pass2")}
+                        </div>
                     </div>
                 </div>
                 <button type="submit" class="btn btn-amber" style="width:100%">Create Account</button>
