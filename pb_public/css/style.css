@@ -164,6 +164,29 @@ img { max-width: 100%; border-radius: var(--radius); }
 .btn-danger:hover { opacity: .85; }
 .btn-sm { padding: .35rem .9rem; font-size: .85rem; }
 
+/* ── Search bar ───────────────────────────────────────────────────────────── */
+.search-bar {
+    margin-bottom: 1.5rem;
+}
+
+.search-bar input {
+    width: 100%;
+    padding: .65rem 1rem;
+    font-size: 1rem;
+    font-family: inherit;
+    border: 1.5px solid var(--border);
+    border-radius: 25px;
+    background: var(--white);
+    color: var(--dark);
+    outline: none;
+    transition: border-color var(--transition), box-shadow var(--transition);
+}
+
+.search-bar input:focus {
+    border-color: var(--amber);
+    box-shadow: 0 0 0 3px rgba(200,134,10,.15);
+}
+
 /* ── Whiskey grid ──────────────────────────────────────────────────────────── */
 .whiskey-grid {
     display: grid;

@@ -95,27 +95,51 @@ function logout() {
 }
 
 // ── Home – whiskey browse ─────────────────────────────────────────────────────
+let _homeRecords   = [];
+let _homeAvgRatings = {};
+
 async function renderHome() {
     appEl.innerHTML = `<div class="loading">Loading whiskeys… 🥃</div>`;
     try {
-        const records = await pb.collection("whiskeys").getFullList({
-            sort: "name",
-            expand: "",
-        });
-        const avgRatings = await loadAverageRatings();
-
-        const cardsHtml = records.length === 0
-            ? `<div class="empty-state"><div class="emoji">🥃</div><p>No whiskeys in the inventory yet.</p></div>`
-            : records.map(w => whiskeyCardHtml(w, avgRatings[w.id])).join("");
+        _homeRecords    = await pb.collection("whiskeys").getFullList({ sort: "name" });
+        _homeAvgRatings = await loadAverageRatings();
 
         appEl.innerHTML = `
             <div class="hero">
                 <h1>🥃 Whiskey Reviews</h1>
                 <p>Discover and review the world's finest whiskies</p>
             </div>
-            <div class="whiskey-grid">${cardsHtml}</div>`;
+            <div class="search-bar">
+                <input
+                    id="whiskey-search"
+                    type="search"
+                    placeholder="Search by name, distillery, country or type…"
+                    oninput="filterWhiskeys(this.value)"
+                    autocomplete="off"
+                />
+            </div>
+            <div id="whiskey-grid" class="whiskey-grid"></div>`;
+
+        filterWhiskeys("");
     } catch (err) {
         appEl.innerHTML = `<div class="form-error">Failed to load whiskeys: ${esc(err.message)}</div>`;
+    }
+}
+
+function filterWhiskeys(query) {
+    const gridEl = document.getElementById("whiskey-grid");
+    if (!gridEl) return;
+    const q = query.trim().toLowerCase();
+    const filtered = q
+        ? _homeRecords.filter(w =>
+            [w.name, w.distillery, w.country, w.type]
+                .some(v => (v || "").toLowerCase().includes(q)))
+        : _homeRecords;
+
+    if (filtered.length === 0) {
+        gridEl.innerHTML = `<div class="empty-state"><div class="emoji">🔍</div><p>No whiskeys match your search.</p></div>`;
+    } else {
+        gridEl.innerHTML = filtered.map(w => whiskeyCardHtml(w, _homeAvgRatings[w.id])).join("");
     }
 }
 
