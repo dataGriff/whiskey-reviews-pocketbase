@@ -1,0 +1,544 @@
+/* global PocketBase */
+"use strict";
+
+// ── PocketBase client ────────────────────────────────────────────────────────
+const pb = new PocketBase(window.location.origin);
+pb.autoCancellation(false);
+
+// ── DOM refs ─────────────────────────────────────────────────────────────────
+const appEl      = document.getElementById("app");
+const navLinksEl = document.getElementById("nav-links");
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+function esc(str) {
+    return String(str ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+}
+
+function starsHtml(rating, maxRating = 5) {
+    const filled = Math.round(rating || 0);
+    return `<span class="stars">${"★".repeat(filled)}<span class="stars-empty">${"★".repeat(maxRating - filled)}</span></span>`;
+}
+
+function formatDate(iso) {
+    return new Date(iso).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+}
+
+function imageUrl(record, filename) {
+    if (!filename) return null;
+    return pb.getFileUrl(record, filename, { thumb: "300x300" });
+}
+
+function navigate(path) {
+    window.location.hash = "#" + path;
+}
+
+function currentUser() {
+    return pb.authStore.model;
+}
+
+function isAdmin() {
+    return currentUser()?.whiskey_admin === true;
+}
+
+// ── Router ───────────────────────────────────────────────────────────────────
+window.addEventListener("hashchange", route);
+window.addEventListener("load", route);
+
+function route() {
+    const hash = window.location.hash.replace(/^#/, "") || "/";
+    renderNav();
+
+    if (hash === "/" || hash === "") {
+        renderHome();
+    } else if (hash === "/login") {
+        renderLogin();
+    } else if (hash === "/register") {
+        renderRegister();
+    } else if (hash === "/add-whiskey") {
+        renderAddWhiskey();
+    } else if (hash.startsWith("/whiskey/")) {
+        const id = hash.split("/")[2];
+        renderWhiskeyDetail(id);
+    } else {
+        renderHome();
+    }
+}
+
+// ── Navbar ───────────────────────────────────────────────────────────────────
+function renderNav() {
+    const user = currentUser();
+    if (!user) {
+        navLinksEl.innerHTML = `
+            <a href="#/login">Login</a>
+            <a href="#/register" class="btn-primary">Register</a>`;
+    } else {
+        const adminBadge = isAdmin() ? `<span class="admin-badge">ADMIN</span>` : "";
+        navLinksEl.innerHTML = `
+            ${isAdmin() ? `<a href="#/add-whiskey">+ Add Whiskey</a>` : ""}
+            <span style="color:#ccc;font-size:.9rem">
+                👤 ${esc(user.username)}${adminBadge}
+            </span>
+            <button onclick="logout()">Logout</button>`;
+    }
+}
+
+function logout() {
+    pb.authStore.clear();
+    navigate("/");
+}
+
+// ── Home – whiskey browse ─────────────────────────────────────────────────────
+async function renderHome() {
+    appEl.innerHTML = `<div class="loading">Loading whiskeys… 🥃</div>`;
+    try {
+        const records = await pb.collection("whiskeys").getFullList({
+            sort: "name",
+            expand: "",
+        });
+        const avgRatings = await loadAverageRatings();
+
+        const cardsHtml = records.length === 0
+            ? `<div class="empty-state"><div class="emoji">🥃</div><p>No whiskeys in the inventory yet.</p></div>`
+            : records.map(w => whiskeyCardHtml(w, avgRatings[w.id])).join("");
+
+        appEl.innerHTML = `
+            <div class="hero">
+                <h1>🥃 Whiskey Reviews</h1>
+                <p>Discover and review the world's finest whiskies</p>
+            </div>
+            <div class="whiskey-grid">${cardsHtml}</div>`;
+    } catch (err) {
+        appEl.innerHTML = `<div class="form-error">Failed to load whiskeys: ${esc(err.message)}</div>`;
+    }
+}
+
+async function loadAverageRatings() {
+    try {
+        const reviews = await pb.collection("reviews").getFullList({ fields: "whiskey,rating" });
+        const totals = {};
+        const counts = {};
+        for (const r of reviews) {
+            totals[r.whiskey] = (totals[r.whiskey] || 0) + r.rating;
+            counts[r.whiskey] = (counts[r.whiskey] || 0) + 1;
+        }
+        const avgs = {};
+        for (const id of Object.keys(totals)) {
+            avgs[id] = { avg: totals[id] / counts[id], count: counts[id] };
+        }
+        return avgs;
+    } catch (_) {
+        return {};
+    }
+}
+
+function whiskeyCardHtml(w, ratingInfo) {
+    const imgUrl  = imageUrl(w, w.image);
+    const thumb   = imgUrl
+        ? `<img src="${esc(imgUrl)}" alt="${esc(w.name)}" loading="lazy" />`
+        : "🥃";
+    const ratingHtml = ratingInfo
+        ? `${starsHtml(ratingInfo.avg)} <span class="review-count">(${ratingInfo.count})</span>`
+        : `<span class="text-muted" style="font-size:.82rem">No reviews yet</span>`;
+
+    return `
+        <div class="whiskey-card" onclick="navigate('/whiskey/${esc(w.id)}')">
+            <div class="card-thumb">${thumb}</div>
+            <div class="card-body">
+                <div class="card-name">${esc(w.name)}</div>
+                <div class="card-meta">${esc(w.distillery || "")}${w.distillery && w.country ? " · " : ""}${esc(w.country || "")}</div>
+                ${w.type ? `<div class="card-type">${esc(w.type)}</div>` : ""}
+                <div class="card-stars">${ratingHtml}</div>
+            </div>
+        </div>`;
+}
+
+// ── Whiskey detail ────────────────────────────────────────────────────────────
+async function renderWhiskeyDetail(id) {
+    appEl.innerHTML = `<div class="loading">Loading… 🥃</div>`;
+    try {
+        const [whiskey, reviewsPage] = await Promise.all([
+            pb.collection("whiskeys").getOne(id),
+            pb.collection("reviews").getList(1, 200, {
+                filter: `whiskey = "${id}"`,
+                sort:   "-created",
+                expand: "user",
+            }),
+        ]);
+        renderDetailView(whiskey, reviewsPage.items);
+    } catch (err) {
+        appEl.innerHTML = `
+            <a href="#/" class="back-link">Back to whiskeys</a>
+            <div class="form-error">Failed to load whiskey: ${esc(err.message)}</div>`;
+    }
+}
+
+function renderDetailView(w, reviews) {
+    const imgUrl = imageUrl(w, w.image);
+    const imgHtml = imgUrl
+        ? `<img src="${esc(imgUrl)}" alt="${esc(w.name)}" />`
+        : "🥃";
+
+    const specsArr = [];
+    if (w.distillery) specsArr.push(`<span><strong>Distillery:</strong> ${esc(w.distillery)}</span>`);
+    if (w.country)    specsArr.push(`<span><strong>Country:</strong> ${esc(w.country)}</span>`);
+    if (w.region)     specsArr.push(`<span><strong>Region:</strong> ${esc(w.region)}</span>`);
+    if (w.age)        specsArr.push(`<span><strong>Age:</strong> ${esc(w.age)} years</span>`);
+    if (w.abv)        specsArr.push(`<span><strong>ABV:</strong> ${esc(w.abv)}%</span>`);
+
+    const avgRating = reviews.length
+        ? reviews.reduce((s, r) => s + r.rating, 0) / reviews.length
+        : null;
+
+    const user = currentUser();
+    const hasReviewed = user ? reviews.some(r => r.user === user.id) : false;
+
+    const reviewsHtml = reviews.length === 0
+        ? `<div class="empty-state"><div class="emoji">📝</div><p>No reviews yet. Be the first!</p></div>`
+        : reviews.map(r => reviewCardHtml(r)).join("");
+
+    const addReviewHtml = !user
+        ? `<p class="text-muted mb-2">
+               <a href="#/login">Login</a> or <a href="#/register">register</a> to write a review.
+           </p>`
+        : hasReviewed
+            ? `<p class="text-muted mb-2">You've already reviewed this whiskey.</p>`
+            : reviewFormHtml(w.id);
+
+    appEl.innerHTML = `
+        <a href="#/" class="back-link">Back to whiskeys</a>
+        <div class="detail-header">
+            <div class="detail-image">${imgHtml}</div>
+            <div class="detail-info">
+                <h1>${esc(w.name)}</h1>
+                ${w.type ? `<div class="type-badge">${esc(w.type)}</div>` : ""}
+                <div class="specs">${specsArr.join("")}</div>
+                ${avgRating !== null
+                    ? `<div class="mb-1">${starsHtml(avgRating)} <span class="review-count">${reviews.length} review${reviews.length !== 1 ? "s" : ""}</span></div>`
+                    : `<div class="text-muted mb-1">No reviews yet</div>`}
+                ${w.description ? `<p class="description">${esc(w.description)}</p>` : ""}
+                ${isAdmin() ? `<div style="margin-top:1rem"><a href="#/edit-whiskey/${esc(w.id)}" class="btn btn-outline btn-sm">Edit Whiskey</a></div>` : ""}
+            </div>
+        </div>
+
+        <h2 class="section-title">Reviews</h2>
+        ${addReviewHtml}
+        <div id="reviews-list">${reviewsHtml}</div>`;
+
+    // Bind review form submit
+    const form = document.getElementById("review-form");
+    if (form) {
+        form.addEventListener("submit", e => submitReview(e, w.id));
+    }
+}
+
+function reviewCardHtml(r) {
+    const username = r.expand?.user?.username ?? "Unknown";
+    const canDelete = currentUser()?.id === r.user;
+    return `
+        <div class="review-card" id="review-${esc(r.id)}">
+            <div class="review-header">
+                <span>
+                    ${starsHtml(r.rating)}
+                    <span class="review-username">@${esc(username)}</span>
+                </span>
+                <span class="review-date">${formatDate(r.created)}</span>
+            </div>
+            ${r.title ? `<div class="review-title">${esc(r.title)}</div>` : ""}
+            ${r.body  ? `<div class="review-body">${esc(r.body)}</div>`   : ""}
+            ${canDelete ? `
+                <div class="review-actions">
+                    <button class="btn btn-danger btn-sm" onclick="deleteReview('${esc(r.id)}', '${esc(r.whiskey)}')">Delete</button>
+                </div>` : ""}
+        </div>`;
+}
+
+function reviewFormHtml(whiskeyId) {
+    return `
+        <div class="form-card mb-3" style="max-width:600px;margin-left:0">
+            <h2>Write a Review</h2>
+            <div id="review-error"></div>
+            <form id="review-form">
+                <input type="hidden" name="whiskey" value="${esc(whiskeyId)}" />
+                <div class="form-group">
+                    <label>Rating *</label>
+                    <div class="star-input">
+                        ${[5,4,3,2,1].map(n => `
+                        <input type="radio" name="rating" id="star${n}" value="${n}" ${n === 5 ? "required" : ""} />
+                        <label for="star${n}" title="${n} star${n !== 1 ? "s" : ""}">★</label>`).join("")}
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="rev-title">Title</label>
+                    <input type="text" id="rev-title" name="title" placeholder="e.g. A superb dram" maxlength="200" />
+                </div>
+                <div class="form-group">
+                    <label for="rev-body">Your Review</label>
+                    <textarea id="rev-body" name="body" placeholder="Share your tasting notes, impressions…"></textarea>
+                </div>
+                <button type="submit" class="btn btn-amber">Submit Review</button>
+            </form>
+        </div>`;
+}
+
+async function submitReview(e, whiskeyId) {
+    e.preventDefault();
+    const form  = e.target;
+    const errEl = document.getElementById("review-error");
+    errEl.innerHTML = "";
+
+    const ratingInput = form.querySelector('input[name="rating"]:checked');
+    if (!ratingInput) {
+        errEl.innerHTML = `<div class="form-error">Please select a rating.</div>`;
+        return;
+    }
+
+    const data = {
+        whiskey: whiskeyId,
+        user:    currentUser().id,
+        rating:  parseInt(ratingInput.value, 10),
+        title:   form.title.value.trim(),
+        body:    form.body.value.trim(),
+    };
+
+    try {
+        await pb.collection("reviews").create(data);
+        renderWhiskeyDetail(whiskeyId);
+    } catch (err) {
+        const msg = err.response?.message || err.message || "Failed to submit review.";
+        errEl.innerHTML = `<div class="form-error">${esc(msg)}</div>`;
+    }
+}
+
+async function deleteReview(reviewId, whiskeyId) {
+    if (!confirm("Delete this review?")) return;
+    try {
+        await pb.collection("reviews").delete(reviewId);
+        renderWhiskeyDetail(whiskeyId);
+    } catch (err) {
+        alert("Failed to delete review: " + err.message);
+    }
+}
+
+// ── Login ─────────────────────────────────────────────────────────────────────
+function renderLogin() {
+    if (currentUser()) return navigate("/");
+    appEl.innerHTML = `
+        <div class="form-card">
+            <h2>🥃 Login</h2>
+            <div id="login-error"></div>
+            <form id="login-form">
+                <div class="form-group">
+                    <label for="login-email">Email or Username</label>
+                    <input type="text" id="login-email" required autocomplete="username" />
+                </div>
+                <div class="form-group">
+                    <label for="login-pass">Password</label>
+                    <input type="password" id="login-pass" required autocomplete="current-password" />
+                </div>
+                <button type="submit" class="btn btn-amber" style="width:100%">Login</button>
+            </form>
+            <div class="form-footer">Don't have an account? <a href="#/register">Register</a></div>
+        </div>`;
+    document.getElementById("login-form").addEventListener("submit", handleLogin);
+}
+
+async function handleLogin(e) {
+    e.preventDefault();
+    const errEl = document.getElementById("login-error");
+    const identity = document.getElementById("login-email").value.trim();
+    const password = document.getElementById("login-pass").value;
+    errEl.innerHTML = "";
+    try {
+        await pb.collection("users").authWithPassword(identity, password);
+        navigate("/");
+    } catch (err) {
+        const msg = err.response?.message || err.message || "Login failed.";
+        errEl.innerHTML = `<div class="form-error">${esc(msg)}</div>`;
+    }
+}
+
+// ── Register ──────────────────────────────────────────────────────────────────
+function renderRegister() {
+    if (currentUser()) return navigate("/");
+    appEl.innerHTML = `
+        <div class="form-card">
+            <h2>🥃 Create Account</h2>
+            <p class="text-muted mb-2" style="font-size:.9rem">Your username is your public display name on reviews.</p>
+            <div id="reg-error"></div>
+            <form id="reg-form">
+                <div class="form-group">
+                    <label for="reg-username">Username *</label>
+                    <input type="text" id="reg-username" required minlength="3" maxlength="40"
+                           placeholder="e.g. whiskey_lover42" autocomplete="username" />
+                </div>
+                <div class="form-group">
+                    <label for="reg-email">Email *</label>
+                    <input type="email" id="reg-email" required autocomplete="email" />
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="reg-pass">Password *</label>
+                        <input type="password" id="reg-pass" required minlength="8" autocomplete="new-password" />
+                    </div>
+                    <div class="form-group">
+                        <label for="reg-pass2">Confirm *</label>
+                        <input type="password" id="reg-pass2" required minlength="8" autocomplete="new-password" />
+                    </div>
+                </div>
+                <button type="submit" class="btn btn-amber" style="width:100%">Create Account</button>
+            </form>
+            <div class="form-footer">Already have an account? <a href="#/login">Login</a></div>
+        </div>`;
+    document.getElementById("reg-form").addEventListener("submit", handleRegister);
+}
+
+async function handleRegister(e) {
+    e.preventDefault();
+    const errEl = document.getElementById("reg-error");
+    const username = document.getElementById("reg-username").value.trim();
+    const email    = document.getElementById("reg-email").value.trim();
+    const pass     = document.getElementById("reg-pass").value;
+    const pass2    = document.getElementById("reg-pass2").value;
+    errEl.innerHTML = "";
+
+    if (pass !== pass2) {
+        errEl.innerHTML = `<div class="form-error">Passwords do not match.</div>`;
+        return;
+    }
+
+    try {
+        await pb.collection("users").create({
+            username,
+            email,
+            password: pass,
+            passwordConfirm: pass2,
+            emailVisibility: false,
+        });
+        await pb.collection("users").authWithPassword(email, pass);
+        navigate("/");
+    } catch (err) {
+        const data   = err.response?.data || {};
+        const fields = Object.entries(data).map(([k, v]) => `<strong>${esc(k)}</strong>: ${esc(v?.message ?? v)}`).join("<br>");
+        const msg    = fields || esc(err.response?.message || err.message || "Registration failed.");
+        errEl.innerHTML = `<div class="form-error">${msg}</div>`;
+    }
+}
+
+// ── Add Whiskey (admin) ───────────────────────────────────────────────────────
+function renderAddWhiskey() {
+    if (!currentUser()) return navigate("/login");
+    if (!isAdmin()) {
+        appEl.innerHTML = `<div class="form-error">Access denied. Whiskey admin role required.</div>`;
+        return;
+    }
+    appEl.innerHTML = `
+        <a href="#/" class="back-link">Back to whiskeys</a>
+        <div class="form-card" style="max-width:700px;margin:0 auto">
+            <h2>🥃 Add Whiskey</h2>
+            <div id="wsk-error"></div>
+            <div id="wsk-success"></div>
+            <form id="wsk-form" enctype="multipart/form-data">
+                <div class="form-group">
+                    <label for="wsk-name">Name *</label>
+                    <input type="text" id="wsk-name" required placeholder="e.g. Glenfiddich 12 Year Old" />
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="wsk-distillery">Distillery</label>
+                        <input type="text" id="wsk-distillery" placeholder="e.g. Glenfiddich" />
+                    </div>
+                    <div class="form-group">
+                        <label for="wsk-type">Type</label>
+                        <select id="wsk-type">
+                            <option value="">— select —</option>
+                            <option>Single Malt Scotch</option>
+                            <option>Blended Scotch</option>
+                            <option>Bourbon</option>
+                            <option>Rye</option>
+                            <option>Irish</option>
+                            <option>Japanese</option>
+                            <option>Canadian</option>
+                            <option>Other</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="wsk-country">Country</label>
+                        <input type="text" id="wsk-country" placeholder="e.g. Scotland" />
+                    </div>
+                    <div class="form-group">
+                        <label for="wsk-region">Region</label>
+                        <input type="text" id="wsk-region" placeholder="e.g. Speyside" />
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="wsk-age">Age (years)</label>
+                        <input type="number" id="wsk-age" min="0" max="100" placeholder="e.g. 12" />
+                    </div>
+                    <div class="form-group">
+                        <label for="wsk-abv">ABV (%)</label>
+                        <input type="number" id="wsk-abv" min="0" max="100" step="0.1" placeholder="e.g. 43.0" />
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="wsk-description">Description</label>
+                    <textarea id="wsk-description" rows="4" placeholder="Tasting notes, history, character…"></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="wsk-image">Image (optional)</label>
+                    <input type="file" id="wsk-image" accept="image/*" style="background:transparent;border:none;padding:0" />
+                </div>
+                <button type="submit" class="btn btn-amber">Add Whiskey</button>
+            </form>
+        </div>`;
+    document.getElementById("wsk-form").addEventListener("submit", handleAddWhiskey);
+}
+
+async function handleAddWhiskey(e) {
+    e.preventDefault();
+    const errEl  = document.getElementById("wsk-error");
+    const succEl = document.getElementById("wsk-success");
+    errEl.innerHTML  = "";
+    succEl.innerHTML = "";
+
+    const formData = new FormData();
+    formData.append("name",        document.getElementById("wsk-name").value.trim());
+    formData.append("distillery",  document.getElementById("wsk-distillery").value.trim());
+    formData.append("type",        document.getElementById("wsk-type").value);
+    formData.append("country",     document.getElementById("wsk-country").value.trim());
+    formData.append("region",      document.getElementById("wsk-region").value.trim());
+    const age = document.getElementById("wsk-age").value;
+    const abv = document.getElementById("wsk-abv").value;
+    if (age) formData.append("age", age);
+    if (abv) formData.append("abv", abv);
+    formData.append("description", document.getElementById("wsk-description").value.trim());
+    const imageFile = document.getElementById("wsk-image").files[0];
+    if (imageFile) formData.append("image", imageFile);
+
+    if (!formData.get("name")) {
+        errEl.innerHTML = `<div class="form-error">Name is required.</div>`;
+        return;
+    }
+
+    try {
+        const record = await pb.collection("whiskeys").create(formData);
+        succEl.innerHTML = `<div class="form-success">Whiskey added! <a href="#/whiskey/${record.id}">View it →</a></div>`;
+        e.target.reset();
+    } catch (err) {
+        const data   = err.response?.data || {};
+        const fields = Object.entries(data).map(([k, v]) => `<strong>${esc(k)}</strong>: ${esc(v?.message ?? v)}`).join("<br>");
+        const msg    = fields || esc(err.response?.message || err.message || "Failed to add whiskey.");
+        errEl.innerHTML = `<div class="form-error">${msg}</div>`;
+    }
+}
+
+// ── Expose globals used in inline handlers ────────────────────────────────────
+window.navigate      = navigate;
+window.logout        = logout;
+window.deleteReview  = deleteReview;
