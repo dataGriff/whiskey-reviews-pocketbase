@@ -359,6 +359,14 @@ img { max-width: 100%; border-radius: var(--radius); }
     gap: .5rem;
 }
 
+.my-review-whiskey {
+    font-weight: 700;
+    font-size: 1rem;
+    color: var(--dark);
+    margin-left: .4rem;
+}
+.my-review-whiskey:hover { color: var(--amber); }
+
 /* ── Forms ─────────────────────────────────────────────────────────────────── */
 .form-card {
     background: var(--white);

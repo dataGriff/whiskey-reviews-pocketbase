@@ -60,6 +60,8 @@ function route() {
         renderRegister();
     } else if (hash === "/add-whiskey") {
         renderAddWhiskey();
+    } else if (hash === "/my-reviews") {
+        renderMyReviews();
     } else if (hash.startsWith("/whiskey/")) {
         const id = hash.split("/")[2];
         renderWhiskeyDetail(id);
@@ -79,6 +81,7 @@ function renderNav() {
         const adminBadge = isAdmin() ? `<span class="admin-badge">ADMIN</span>` : "";
         navLinksEl.innerHTML = `
             ${isAdmin() ? `<a href="#/add-whiskey">+ Add Whiskey</a>` : ""}
+            <a href="#/my-reviews">My Reviews</a>
             <span style="color:#ccc;font-size:.9rem">
                 👤 ${esc(user.username)}${adminBadge}
             </span>
@@ -113,6 +116,20 @@ async function renderHome() {
             <div class="whiskey-grid">${cardsHtml}</div>`;
     } catch (err) {
         appEl.innerHTML = `<div class="form-error">Failed to load whiskeys: ${esc(err.message)}</div>`;
+    }
+}
+
+async function loadNicknames(userIds) {
+    try {
+        const unique = [...new Set(userIds)].filter(Boolean);
+        if (!unique.length) return {};
+        const filter = unique.map(id => `user = "${id}"`).join(" || ");
+        const profiles = await pb.collection("public_profiles").getFullList({ filter, fields: "user,nickname" });
+        const map = {};
+        for (const p of profiles) map[p.user] = p.nickname;
+        return map;
+    } catch (_) {
+        return {};
     }
 }
 
@@ -165,10 +182,11 @@ async function renderWhiskeyDetail(id) {
             pb.collection("reviews").getList(1, 200, {
                 filter: `whiskey = "${id}"`,
                 sort:   "-created",
-                expand: "user",
             }),
         ]);
-        renderDetailView(whiskey, reviewsPage.items);
+        const reviews = reviewsPage.items;
+        const nicknames = await loadNicknames(reviews.map(r => r.user));
+        renderDetailView(whiskey, reviews, nicknames);
     } catch (err) {
         appEl.innerHTML = `
             <a href="#/" class="back-link">Back to whiskeys</a>
@@ -176,7 +194,7 @@ async function renderWhiskeyDetail(id) {
     }
 }
 
-function renderDetailView(w, reviews) {
+function renderDetailView(w, reviews, nicknames) {
     const imgUrl = imageUrl(w, w.image);
     const imgHtml = imgUrl
         ? `<img src="${esc(imgUrl)}" alt="${esc(w.name)}" />`
@@ -198,7 +216,7 @@ function renderDetailView(w, reviews) {
 
     const reviewsHtml = reviews.length === 0
         ? `<div class="empty-state"><div class="emoji">📝</div><p>No reviews yet. Be the first!</p></div>`
-        : reviews.map(r => reviewCardHtml(r)).join("");
+        : reviews.map(r => reviewCardHtml(r, nicknames)).join("");
 
     const addReviewHtml = !user
         ? `<p class="text-muted mb-2">
@@ -235,8 +253,8 @@ function renderDetailView(w, reviews) {
     }
 }
 
-function reviewCardHtml(r) {
-    const username = r.expand?.user?.username ?? "Unknown";
+function reviewCardHtml(r, nicknames) {
+    const username = nicknames?.[r.user] ?? "Unknown";
     const canDelete = currentUser()?.id === r.user;
     return `
         <div class="review-card" id="review-${esc(r.id)}">
@@ -419,6 +437,10 @@ async function handleRegister(e) {
             emailVisibility: false,
         });
         await pb.collection("users").authWithPassword(email, pass);
+        await pb.collection("public_profiles").create({
+            user:     pb.authStore.model.id,
+            nickname: username,
+        });
         navigate("/");
     } catch (err) {
         const data   = err.response?.data || {};
@@ -538,7 +560,69 @@ async function handleAddWhiskey(e) {
     }
 }
 
+// ── My Reviews ────────────────────────────────────────────────────────────────
+async function renderMyReviews() {
+    const user = currentUser();
+    if (!user) return navigate("/login");
+
+    appEl.innerHTML = `<div class="loading">Loading your reviews… 🥃</div>`;
+    try {
+        const reviews = await pb.collection("reviews").getFullList({
+            filter: `user = "${user.id}"`,
+            sort:   "-created",
+            expand: "whiskey",
+        });
+
+        const cardsHtml = reviews.length === 0
+            ? `<div class="empty-state"><div class="emoji">📝</div><p>You haven't written any reviews yet. <a href="#/">Browse whiskeys</a> to get started!</p></div>`
+            : reviews.map(r => myReviewCardHtml(r)).join("");
+
+        appEl.innerHTML = `
+            <h1 class="section-title" style="margin-bottom:1.5rem">My Reviews <span style="font-size:1rem;font-weight:400;color:var(--mid)">(${reviews.length})</span></h1>
+            ${cardsHtml}`;
+    } catch (err) {
+        appEl.innerHTML = `<div class="form-error">Failed to load your reviews: ${esc(err.message)}</div>`;
+    }
+}
+
+function myReviewCardHtml(r) {
+    const w = r.expand?.whiskey;
+    const whiskeyName = w ? esc(w.name) : "Unknown Whiskey";
+    const whiskeyLink = w
+        ? `<a href="#/whiskey/${esc(w.id)}" class="my-review-whiskey">${whiskeyName}</a>`
+        : `<span class="my-review-whiskey">${whiskeyName}</span>`;
+    return `
+        <div class="review-card" id="review-${esc(r.id)}">
+            <div class="review-header">
+                <span>
+                    ${starsHtml(r.rating)}
+                    ${whiskeyLink}
+                </span>
+                <span class="review-date">${formatDate(r.created)}</span>
+            </div>
+            ${r.title ? `<div class="review-title">${esc(r.title)}</div>` : ""}
+            ${r.body  ? `<div class="review-body">${esc(r.body)}</div>`   : ""}
+            <div class="review-actions">
+                <a href="#/whiskey/${w ? esc(w.id) : ""}" class="btn btn-outline btn-sm">View Whiskey</a>
+                <button class="btn btn-danger btn-sm" onclick="deleteMyReview('${esc(r.id)}')">
+                    Delete
+                </button>
+            </div>
+        </div>`;
+}
+
+async function deleteMyReview(reviewId) {
+    if (!confirm("Delete this review?")) return;
+    try {
+        await pb.collection("reviews").delete(reviewId);
+        renderMyReviews();
+    } catch (err) {
+        alert("Failed to delete review: " + err.message);
+    }
+}
+
 // ── Expose globals used in inline handlers ────────────────────────────────────
-window.navigate      = navigate;
-window.logout        = logout;
-window.deleteReview  = deleteReview;
+window.navigate        = navigate;
+window.logout          = logout;
+window.deleteReview    = deleteReview;
+window.deleteMyReview  = deleteMyReview;
